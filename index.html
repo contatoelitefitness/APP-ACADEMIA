@@ -46,7 +46,7 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
   <div class="tabs" id="tabs"></div>
 </header>
 <main id="app"><p class="empty">Carregando…</p></main>
-<footer class="ver">versão 3</footer>
+<footer class="ver">versão 4</footer>
 <dialog id="dlg"></dialog>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
@@ -64,13 +64,13 @@ const esc = s => String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&
 const fmtData = iso => new Date(iso).toLocaleString("pt-BR",{timeZone:"America/Sao_Paulo",day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
 const dia = iso => new Date(iso).toLocaleDateString("pt-BR",{timeZone:"America/Sao_Paulo"});
 
-let cats=[], prods=[], vendas=[], view="vender", catId=null, senha=null;
+let cats=[], prods=[], vendas=[], view="vender", catId=null, senha=null, filtroPg="todos";
 
 async function load(){
   const [c,p,v] = await Promise.all([
     db.from("categorias").select("*").order("nome"),
     db.from("produtos").select("*").eq("ativo",true).order("nome"),
-    db.from("vendas").select("*").order("criado_em",{ascending:false}).limit(150)
+    db.from("vendas").select("*").order("criado_em",{ascending:false}).limit(500)
   ]);
   if(c.error||p.error||v.error){
     $("app").innerHTML=`<p class="msg">Não conectou ao Supabase. Confira a URL e a chave no topo do index.html.</p>`;return;
@@ -99,16 +99,20 @@ function vVender(){
 }
 
 function vHistorico(){
-  if(!vendas.length) return '<p class="empty">Nenhuma venda registrada ainda.</p>';
+  const filtros=[["todos","Todos"],["pix","Pix (todos)"],["Pix maquininha","Pix maquininha"],["Pix direto (Leo)","Pix direto (Leo)"],["Crédito","Crédito"],["Débito","Débito"]];
+  const casa=(v,f)=>f==="todos"||(f==="pix"?v.forma_pagamento.startsWith("Pix"):v.forma_pagamento===f);
+  const soma=l=>l.reduce((s,v)=>s+Number(v.valor_total),0);
+  const chips=filtros.map(([k,t])=>`<button class="${filtroPg===k?"on":""}" data-fpg="${k}">${t}</button>`).join("");
+  const lista=vendas.filter(v=>casa(v,filtroPg));
+  const topo=`<div class="chips">${chips}</div>
+    <div class="row"><div class="nm"><b>Total (${lista.length} venda${lista.length===1?"":"s"})</b></div><div class="pr">${brl(soma(lista))}</div></div>`;
+  if(!lista.length) return topo+'<p class="empty">Nenhuma venda nesse filtro.</p>';
   const grupos={};
-  vendas.forEach(v=>{(grupos[dia(v.criado_em)] ||= []).push(v)});
-  return Object.entries(grupos).map(([d,vs])=>{
-    const t = vs.reduce((s,v)=>s+Number(v.valor_total),0);
-    return `<h2>${d} — <span class="sum">${brl(t)}</span></h2>`+vs.map(v=>`
+  lista.forEach(v=>{(grupos[dia(v.criado_em)] ||= []).push(v)});
+  return topo+Object.entries(grupos).map(([d,vs])=>`<h2>${d} — <span class="sum">${brl(soma(vs))}</span></h2>`+vs.map(v=>`
       <div class="row"><div class="nm"><b>${v.quantidade}× ${esc(v.produto_nome)}</b>
         <span class="est" style="color:var(--mut)">${fmtData(v.criado_em)} · ${esc(v.forma_pagamento)}</span></div>
-        <div class="pr">${brl(v.valor_total)}</div><button data-delvenda="${v.id}">Excluir</button></div>`).join("");
-  }).join("");
+        <div class="pr">${brl(v.valor_total)}</div><button data-delvenda="${v.id}">Excluir</button></div>`).join("")).join("");
 }
 
 function vGerenciar(){
@@ -200,6 +204,7 @@ document.addEventListener("click", async e=>{
     if(t.dataset.view!=="gerenciar") senha=null;
     view=t.dataset.view; render();
   }
+  else if(t.dataset.fpg){filtroPg=t.dataset.fpg;render()}
   else if(t.dataset.cat){catId=t.dataset.cat;render()}
   else if(t.dataset.sell) abrirVenda(t.dataset.sell);
   else if(t.dataset.delvenda){
