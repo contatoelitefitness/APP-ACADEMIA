@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Vendas e estoque</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#2f5bff">
+<link rel="apple-touch-icon" href="icon-192.png">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800&display=swap">
 <style>
 :root{--bg:#f2f4f7;--card:#fff;--ink:#14213d;--mut:#5d6b82;--line:#dde2ea;--acc:#2f5bff;--acc-ink:#fff;--ok:#16794a;--low:#b3261e}
@@ -47,8 +50,8 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script>
 // ====== COLE AQUI os dados do seu projeto Supabase (Settings > API) ======
-const SUPABASE_URL = "COLE_A_URL_AQUI";
-const SUPABASE_KEY = "COLE_A_CHAVE_ANON_AQUI";
+const SUPABASE_URL = "https://srlglmytvfulylxeyquw.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNybGdsbXl0dmZ1bHlseGV5cXV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI1OTIyMzAsImV4cCI6MjEwODE2ODIzMH0.-TEgRy4DsGEZGpB-nxY3S2_fLKAwWgzcGu5f_p2hE64";
 // =========================================================================
 
 const PAGAMENTOS = ["Pix maquininha","Pix direto (Leo)","Crédito","Débito"];
@@ -176,6 +179,7 @@ document.addEventListener("click", async e=>{
   }
 });
 
+if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");
 load();
 </script>
 </body>
