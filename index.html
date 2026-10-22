@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vendas e estoque</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800&display=swap">
+<style>
+:root{--bg:#f2f4f7;--card:#fff;--ink:#14213d;--mut:#5d6b82;--line:#dde2ea;--acc:#2f5bff;--acc-ink:#fff;--ok:#16794a;--low:#b3261e}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1624;--card:#18223a;--ink:#eef2fb;--mut:#9aa7c2;--line:#2a3756;--acc:#6f8cff;--acc-ink:#0f1624;--ok:#5fd39b;--low:#ff8a80}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 Archivo,system-ui,sans-serif}
+header{position:sticky;top:0;background:var(--bg);padding:14px 16px 8px;z-index:5}
+h1{margin:0 0 10px;font-size:22px;font-weight:800}
+.tabs,.chips{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px}
+button{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:10px 14px;border-radius:10px;white-space:nowrap}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+button.on{background:var(--acc);color:var(--acc-ink);border-color:var(--acc);font-weight:600}
+button.go{background:var(--acc);color:var(--acc-ink);border-color:var(--acc);font-weight:600}
+button:disabled{opacity:.4;cursor:not-allowed}
+main{padding:8px 16px 40px;max-width:640px;margin:0 auto}
+.row{display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:8px}
+.row .nm{flex:1;min-width:0}.row b{display:block;font-weight:600}
+.est{font-size:14px;color:var(--ok)}.est.low{color:var(--low)}
+.pr{font-weight:800}
+h2{font-size:15px;margin:18px 0 8px;color:var(--mut);font-weight:600}
+.sum{color:var(--ink);font-weight:800}
+input,select{font:inherit;width:100%;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);margin-bottom:8px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+dialog{border:1px solid var(--line);border-radius:16px;background:var(--card);color:var(--ink);width:min(92vw,420px);padding:20px}
+dialog::backdrop{background:rgba(0,0,0,.5)}
+.pay{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}
+.qty{display:flex;align-items:center;gap:14px;margin:10px 0}.qty span{font-size:22px;font-weight:800;min-width:30px;text-align:center}
+.tot{font-size:24px;font-weight:800;margin:10px 0}
+.msg{color:var(--low);min-height:20px}
+.empty{color:var(--mut);padding:20px 0}
+</style>
+</head>
+<body>
+<header>
+  <h1>Vendas e estoque</h1>
+  <div class="tabs" id="tabs"></div>
+</header>
+<main id="app"><p class="empty">Carregando…</p></main>
+<dialog id="dlg"></dialog>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script>
+// ====== COLE AQUI os dados do seu projeto Supabase (Settings > API) ======
+const SUPABASE_URL = "COLE_A_URL_AQUI";
+const SUPABASE_KEY = "COLE_A_CHAVE_ANON_AQUI";
+// =========================================================================
+
+const PAGAMENTOS = ["Pix maquininha","Pix direto (Leo)","Crédito","Débito"];
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const $ = id => document.getElementById(id);
+const brl = n => Number(n).toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
+const esc = s => String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmtData = iso => new Date(iso).toLocaleString("pt-BR",{timeZone:"America/Sao_Paulo",day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
+const dia = iso => new Date(iso).toLocaleDateString("pt-BR",{timeZone:"America/Sao_Paulo"});
+
+let cats=[], prods=[], vendas=[], view="vender", catId=null;
+
+async function load(){
+  const [c,p,v] = await Promise.all([
+    db.from("categorias").select("*").order("nome"),
+    db.from("produtos").select("*").eq("ativo",true).order("nome"),
+    db.from("vendas").select("*").order("criado_em",{ascending:false}).limit(150)
+  ]);
+  if(c.error||p.error||v.error){
+    $("app").innerHTML=`<p class="msg">Não conectou ao Supabase. Confira a URL e a chave no topo do index.html.</p>`;return;
+  }
+  cats=c.data; prods=p.data; vendas=v.data;
+  if(!catId || !cats.some(x=>x.id===catId)) catId = cats[0]?.id;
+  render();
+}
+
+function render(){
+  $("tabs").innerHTML = [["vender","Vender"],["historico","Histórico"],["gerenciar","Gerenciar"]]
+    .map(([k,t])=>`<button class="${view===k?"on":""}" data-view="${k}">${t}</button>`).join("");
+  $("app").innerHTML = view==="vender"?vVender():view==="historico"?vHistorico():vGerenciar();
+}
+
+function vVender(){
+  const chips = cats.map(c=>`<button class="${c.id===catId?"on":""}" data-cat="${c.id}">${esc(c.nome)}</button>`).join("");
+  const list = prods.filter(p=>p.categoria_id===catId).map(p=>`
+    <div class="row">
+      <div class="nm"><b>${esc(p.nome)}</b>
+        <span class="est ${p.estoque<=2?"low":""}">${p.estoque>0?p.estoque+" em estoque":"Sem estoque"}</span></div>
+      <div class="pr">${brl(p.preco)}</div>
+      <button class="go" data-sell="${p.id}" ${p.estoque<1?"disabled":""}>Vender</button>
+    </div>`).join("");
+  return `<div class="chips">${chips}</div>${list||'<p class="empty">Nenhum produto nesta categoria. Adicione em Gerenciar.</p>'}`;
+}
+
+function vHistorico(){
+  if(!vendas.length) return '<p class="empty">Nenhuma venda registrada ainda.</p>';
+  const grupos={};
+  vendas.forEach(v=>{(grupos[dia(v.criado_em)] ||= []).push(v)});
+  return Object.entries(grupos).map(([d,vs])=>{
+    const t = vs.reduce((s,v)=>s+Number(v.valor_total),0);
+    return `<h2>${d} — <span class="sum">${brl(t)}</span></h2>`+vs.map(v=>`
+      <div class="row"><div class="nm"><b>${v.quantidade}× ${esc(v.produto_nome)}</b>
+        <span class="est" style="color:var(--mut)">${fmtData(v.criado_em)} · ${esc(v.forma_pagamento)}</span></div>
+        <div class="pr">${brl(v.valor_total)}</div></div>`).join("");
+  }).join("");
+}
+
+function vGerenciar(){
+  const opts = cats.map(c=>`<option value="${c.id}" ${c.id===catId?"selected":""}>${esc(c.nome)}</option>`).join("");
+  const list = prods.map(p=>`
+    <div class="row"><div class="nm"><b>${esc(p.nome)}</b>
+      <span class="est" style="color:var(--mut)">${esc(cats.find(c=>c.id===p.categoria_id)?.nome||"")} · ${p.estoque} un. · ${brl(p.preco)}</span></div>
+      <button data-repor="${p.id}">Repor</button><button data-del="${p.id}">Remover</button></div>`).join("");
+  return `<h2>Novo produto</h2>
+    <select id="n-cat">${opts}</select>
+    <input id="n-nome" placeholder="Nome (ex: Barrinha integral)">
+    <div class="grid"><input id="n-preco" type="number" step="0.01" inputmode="decimal" placeholder="Preço (R$)">
+    <input id="n-est" type="number" inputmode="numeric" placeholder="Quantidade"></div>
+    <button class="go" id="add-prod">Adicionar produto</button>
+    <h2>Nova categoria</h2>
+    <div class="grid"><input id="c-nome" placeholder="Nome da categoria"><button id="add-cat">Adicionar</button></div>
+    <h2>Produtos</h2>${list||'<p class="empty">Nada cadastrado.</p>'}`;
+}
+
+function abrirVenda(id){
+  const p = prods.find(x=>x.id===id); let q=1, pg=PAGAMENTOS[0];
+  const d=$("dlg");
+  const draw=()=>{
+    d.innerHTML=`<b style="font-size:18px">${esc(p.nome)}</b>
+      <div class="est">${p.estoque} em estoque · ${brl(p.preco)} cada</div>
+      <div class="qty"><button id="q-">−</button><span>${q}</span><button id="q+">+</button></div>
+      <div class="pay">${PAGAMENTOS.map(x=>`<button class="${x===pg?"on":""}" data-pg="${x}">${x}</button>`).join("")}</div>
+      <div class="tot">${brl(p.preco*q)}</div><div class="msg" id="msg"></div>
+      <div class="grid"><button id="cancela">Cancelar</button><button class="go" id="ok">Finalizar venda</button></div>`;
+    $("q-").onclick=()=>{q=Math.max(1,q-1);draw()};
+    $("q+").onclick=()=>{q=Math.min(p.estoque,q+1);draw()};
+    d.querySelectorAll("[data-pg]").forEach(b=>b.onclick=()=>{pg=b.dataset.pg;draw()});
+    $("cancela").onclick=()=>d.close();
+    $("ok").onclick=async()=>{
+      $("ok").disabled=true;
+      const {data,error}=await db.rpc("registrar_venda",{p_produto:p.id,p_qtd:q,p_pagamento:pg});
+      if(error){$("msg").textContent=error.message;$("ok").disabled=false;return}
+      d.innerHTML=`<b style="font-size:18px">Venda registrada</b>
+        <p>${q}× ${esc(p.nome)}<br>${brl(data.valor_total)} · ${esc(pg)}<br>${fmtData(data.criado_em)}</p>
+        <button class="go" id="fecha" style="width:100%">Fechar</button>`;
+      $("fecha").onclick=()=>d.close(); load();
+    };
+  };
+  draw(); d.showModal();
+}
+
+document.addEventListener("click", async e=>{
+  const t=e.target.closest("button"); if(!t) return;
+  if(t.dataset.view){view=t.dataset.view;render()}
+  else if(t.dataset.cat){catId=t.dataset.cat;render()}
+  else if(t.dataset.sell) abrirVenda(t.dataset.sell);
+  else if(t.dataset.repor){
+    const n=parseInt(prompt("Quantas unidades entraram no estoque?"),10);
+    if(n>0){const p=prods.find(x=>x.id===t.dataset.repor);
+      await db.from("produtos").update({estoque:p.estoque+n}).eq("id",p.id);load()}
+  }
+  else if(t.dataset.del){
+    if(confirm("Remover este produto da lista? O histórico de vendas continua salvo.")){
+      await db.from("produtos").update({ativo:false}).eq("id",t.dataset.del);load()}
+  }
+  else if(t.id==="add-prod"){
+    const nome=$("n-nome").value.trim(); if(!nome) return alert("Digite o nome do produto.");
+    await db.from("produtos").insert({categoria_id:$("n-cat").value,nome,
+      preco:parseFloat($("n-preco").value)||0,estoque:parseInt($("n-est").value,10)||0});
+    catId=$("n-cat").value; load();
+  }
+  else if(t.id==="add-cat"){
+    const nome=$("c-nome").value.trim(); if(!nome) return;
+    await db.from("categorias").insert({nome}); load();
+  }
+});
+
+load();
+</script>
+</body>
+</html>
