@@ -37,6 +37,7 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
 .tot{font-size:24px;font-weight:800;margin:10px 0}
 .msg{color:var(--low);min-height:20px}
 .empty{color:var(--mut);padding:20px 0}
+.ver{text-align:center;color:var(--mut);font-size:12px;padding:0 0 24px}
 </style>
 </head>
 <body>
@@ -45,6 +46,7 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
   <div class="tabs" id="tabs"></div>
 </header>
 <main id="app"><p class="empty">Carregando…</p></main>
+<footer class="ver">versão 3</footer>
 <dialog id="dlg"></dialog>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
@@ -62,7 +64,7 @@ const esc = s => String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&
 const fmtData = iso => new Date(iso).toLocaleString("pt-BR",{timeZone:"America/Sao_Paulo",day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
 const dia = iso => new Date(iso).toLocaleDateString("pt-BR",{timeZone:"America/Sao_Paulo"});
 
-let cats=[], prods=[], vendas=[], view="vender", catId=null;
+let cats=[], prods=[], vendas=[], view="vender", catId=null, senha=null;
 
 async function load(){
   const [c,p,v] = await Promise.all([
@@ -105,25 +107,63 @@ function vHistorico(){
     return `<h2>${d} — <span class="sum">${brl(t)}</span></h2>`+vs.map(v=>`
       <div class="row"><div class="nm"><b>${v.quantidade}× ${esc(v.produto_nome)}</b>
         <span class="est" style="color:var(--mut)">${fmtData(v.criado_em)} · ${esc(v.forma_pagamento)}</span></div>
-        <div class="pr">${brl(v.valor_total)}</div></div>`).join("");
+        <div class="pr">${brl(v.valor_total)}</div><button data-delvenda="${v.id}">Excluir</button></div>`).join("");
   }).join("");
 }
 
 function vGerenciar(){
   const opts = cats.map(c=>`<option value="${c.id}" ${c.id===catId?"selected":""}>${esc(c.nome)}</option>`).join("");
+  const listaCats = cats.map(c=>{
+    const n = prods.filter(p=>p.categoria_id===c.id).length;
+    return `<div class="row"><div class="nm"><b>${esc(c.nome)}</b>
+      <span class="est" style="color:var(--mut)">${n} produto(s)</span></div>
+      <button data-delcat="${c.id}">Excluir</button></div>`}).join("");
   const list = prods.map(p=>`
     <div class="row"><div class="nm"><b>${esc(p.nome)}</b>
       <span class="est" style="color:var(--mut)">${esc(cats.find(c=>c.id===p.categoria_id)?.nome||"")} · ${p.estoque} un. · ${brl(p.preco)}</span></div>
-      <button data-repor="${p.id}">Repor</button><button data-del="${p.id}">Remover</button></div>`).join("");
+      <button data-ajustar="${p.id}">Ajustar</button><button data-del="${p.id}">Excluir</button></div>`).join("");
   return `<h2>Novo produto</h2>
     <select id="n-cat">${opts}</select>
     <input id="n-nome" placeholder="Nome (ex: Barrinha integral)">
     <div class="grid"><input id="n-preco" type="number" step="0.01" inputmode="decimal" placeholder="Preço (R$)">
     <input id="n-est" type="number" inputmode="numeric" placeholder="Quantidade"></div>
     <button class="go" id="add-prod">Adicionar produto</button>
-    <h2>Nova categoria</h2>
-    <div class="grid"><input id="c-nome" placeholder="Nome da categoria"><button id="add-cat">Adicionar</button></div>
+    <h2>Categorias</h2>
+    <div class="grid"><input id="c-nome" placeholder="Nome da nova categoria"><button id="add-cat">Adicionar</button></div>
+    ${listaCats}
     <h2>Produtos</h2>${list||'<p class="empty">Nada cadastrado.</p>'}`;
+}
+
+function pedirSenha(depois, texto="Digite a senha para gerenciar."){
+  const d=$("dlg");
+  d.innerHTML=`<b style="font-size:18px">Área protegida</b>
+    <p class="est" style="color:var(--mut)">${esc(texto)}</p>
+    <input id="pw" type="password" autocomplete="off" placeholder="Senha">
+    <div class="msg" id="msg"></div>
+    <div class="grid"><button id="cancela">Cancelar</button><button class="go" id="entrar">Entrar</button></div>`;
+  const tentar=async()=>{
+    const v=$("pw").value; $("entrar").disabled=true;
+    const {error}=await db.rpc("checa_senha",{p_senha:v});
+    if(error){
+      $("msg").textContent = error.message.includes("Senha incorreta") ? "Senha incorreta." : "Erro: "+error.message;
+      $("entrar").disabled=false; $("pw").select(); return;
+    }
+    senha=v; d.close(); depois();
+  };
+  $("cancela").onclick=()=>d.close();
+  $("entrar").onclick=tentar;
+  $("pw").onkeydown=e=>{if(e.key==="Enter")tentar()};
+  d.showModal(); $("pw").focus();
+}
+
+async function gerenciar(fn,args){
+  const {error}=await db.rpc(fn,{p_senha:senha,...args});
+  if(error){
+    alert(error.message);
+    if(error.message.includes("Senha")){senha=null;view="vender";render()}
+    return false;
+  }
+  await load(); return true;
 }
 
 function abrirVenda(id){
@@ -155,31 +195,47 @@ function abrirVenda(id){
 
 document.addEventListener("click", async e=>{
   const t=e.target.closest("button"); if(!t) return;
-  if(t.dataset.view){view=t.dataset.view;render()}
+  if(t.dataset.view){
+    if(t.dataset.view==="gerenciar" && view!=="gerenciar") return pedirSenha(()=>{view="gerenciar";render()});
+    if(t.dataset.view!=="gerenciar") senha=null;
+    view=t.dataset.view; render();
+  }
   else if(t.dataset.cat){catId=t.dataset.cat;render()}
   else if(t.dataset.sell) abrirVenda(t.dataset.sell);
-  else if(t.dataset.repor){
-    const n=parseInt(prompt("Quantas unidades entraram no estoque?"),10);
-    if(n>0){const p=prods.find(x=>x.id===t.dataset.repor);
-      await db.from("produtos").update({estoque:p.estoque+n}).eq("id",p.id);load()}
+  else if(t.dataset.delvenda){
+    const v=vendas.find(x=>x.id===t.dataset.delvenda);
+    pedirSenha(async()=>{
+      await gerenciar("g_excluir_venda",{p_id:v.id});
+      if(view!=="gerenciar") senha=null;
+    }, `Excluir a venda de ${v.quantidade}× ${v.produto_nome} (${brl(v.valor_total)})? As unidades voltam para o estoque. Digite a senha:`);
+  }
+  else if(t.dataset.ajustar){
+    const n=parseInt(prompt("Quanto mudar no estoque?\nDigite 5 para adicionar 5, ou -3 para tirar 3."),10);
+    if(n) await gerenciar("g_ajustar_estoque",{p_id:t.dataset.ajustar,p_delta:n});
   }
   else if(t.dataset.del){
-    if(confirm("Remover este produto da lista? O histórico de vendas continua salvo.")){
-      await db.from("produtos").update({ativo:false}).eq("id",t.dataset.del);load()}
+    if(confirm("Excluir este produto da lista? O histórico de vendas continua salvo."))
+      await gerenciar("g_remover_produto",{p_id:t.dataset.del});
+  }
+  else if(t.dataset.delcat){
+    const c=cats.find(x=>x.id===t.dataset.delcat);
+    const n=prods.filter(p=>p.categoria_id===c.id).length;
+    if(confirm(`Excluir a categoria "${c.nome}" e os ${n} produto(s) dentro dela? O histórico de vendas continua salvo.`))
+      await gerenciar("g_remover_categoria",{p_id:c.id});
   }
   else if(t.id==="add-prod"){
     const nome=$("n-nome").value.trim(); if(!nome) return alert("Digite o nome do produto.");
-    await db.from("produtos").insert({categoria_id:$("n-cat").value,nome,
-      preco:parseFloat($("n-preco").value)||0,estoque:parseInt($("n-est").value,10)||0});
-    catId=$("n-cat").value; load();
+    catId=$("n-cat").value;
+    await gerenciar("g_add_produto",{p_cat:catId,p_nome:nome,
+      p_preco:parseFloat($("n-preco").value)||0,p_est:parseInt($("n-est").value,10)||0});
   }
   else if(t.id==="add-cat"){
     const nome=$("c-nome").value.trim(); if(!nome) return;
-    await db.from("categorias").insert({nome}); load();
+    await gerenciar("g_add_categoria",{p_nome:nome});
   }
 });
 
-if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");
+if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js",{updateViaCache:"none"});
 load();
 </script>
 </body>
