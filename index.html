@@ -46,7 +46,7 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
   <div class="tabs" id="tabs"></div>
 </header>
 <main id="app"><p class="empty">Carregando…</p></main>
-<footer class="ver">versão 4</footer>
+<footer class="ver">versão 4b</footer>
 <dialog id="dlg"></dialog>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
@@ -73,7 +73,8 @@ async function load(){
     db.from("vendas").select("*").order("criado_em",{ascending:false}).limit(500)
   ]);
   if(c.error||p.error||v.error){
-    $("app").innerHTML=`<p class="msg">Não conectou ao Supabase. Confira a URL e a chave no topo do index.html.</p>`;return;
+    const er=c.error||p.error||v.error;
+    $("app").innerHTML=`<p class="msg">Não conectou ao Supabase.</p><p class="est" style="color:var(--mut)">Motivo: ${esc(er.message||er.code||"sem resposta (internet ou projeto pausado)")}</p>`;return;
   }
   cats=c.data; prods=p.data; vendas=v.data;
   if(!catId || !cats.some(x=>x.id===catId)) catId = cats[0]?.id;
